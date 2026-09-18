@@ -18,7 +18,7 @@ class Watch:
     origin: str  # IATA, e.g. "DEL"
     destination: str  # IATA, e.g. "BOM"
     date: str  # departure date, "YYYY-MM-DD"
-    chat_id: int  # Telegram chat to notify
+    chat_id: int = 0  # Telegram chat to notify (0 = use state default)
     target_price: float | None = None  # alert if fare <= this
     last_price: float | None = None  # most recent fare seen
     currency: str = "INR"
@@ -45,10 +45,12 @@ class Watch:
 class State:
     watches: dict[str, Watch] = field(default_factory=dict)
     update_offset: int = 0  # Telegram getUpdates offset
+    default_chat_id: int = 0  # last chat that messaged the bot; alert fallback
 
     def to_dict(self) -> dict:
         return {
             "update_offset": self.update_offset,
+            "default_chat_id": self.default_chat_id,
             "watches": {wid: asdict(w) for wid, w in self.watches.items()},
         }
 
@@ -57,7 +59,11 @@ class State:
         watches = {
             wid: Watch(**wdata) for wid, wdata in data.get("watches", {}).items()
         }
-        return cls(watches=watches, update_offset=int(data.get("update_offset", 0)))
+        return cls(
+            watches=watches,
+            update_offset=int(data.get("update_offset", 0)),
+            default_chat_id=int(data.get("default_chat_id", 0)),
+        )
 
 
 def load_state(path: Path) -> State:
