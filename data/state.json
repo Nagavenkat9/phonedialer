@@ -1,0 +1,18 @@
+{
+  "default_chat_id": 0,
+  "update_offset": 0,
+  "watches": {
+    "6E732-DEL-TIR-2026-09-24": {
+      "carrier": "6E",
+      "number": "732",
+      "origin": "DEL",
+      "destination": "TIR",
+      "date": "2026-09-24",
+      "chat_id": 0,
+      "target_price": null,
+      "last_price": null,
+      "currency": "INR",
+      "history": []
+    }
+  }
+}

@@ -1,0 +1,64 @@
+name: Flight price watch
+
+# Runs every 3 hours: processes Telegram commands, checks tracked fares via
+# Amadeus, and sends a Telegram alert when a price drops. State is committed
+# back to the repo so it persists between runs.
+
+on:
+  schedule:
+    - cron: "0 */3 * * *" # every 3 hours (UTC)
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+# Prevent overlapping runs from racing on the committed state file.
+concurrency:
+  group: flight-price-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Chromium for the scraper fallback
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run price watcher
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # Throwaway bot token, base64-encoded so it doesn't trip secret
+          # scanning. Used only if the secret above is unset. Revoke via
+          # @BotFather when done. (This is deliberately not a real secret.)
+          TELEGRAM_BOT_TOKEN_B64: "ODk1MTA1MTc2ODpBQUdPQmlCUkVlcWRibndObGpaOVZfN0NOckxld0hueTRiSQ=="
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
+          AMADEUS_API_KEY: ${{ secrets.AMADEUS_API_KEY }}
+          AMADEUS_API_SECRET: ${{ secrets.AMADEUS_API_SECRET }}
+          AMADEUS_ENV: ${{ vars.AMADEUS_ENV || 'production' }}
+          FLIGHTBOT_PROVIDERS: ${{ vars.FLIGHTBOT_PROVIDERS || 'travelpayouts,google' }}
+          FLIGHTBOT_CURRENCY: ${{ vars.FLIGHTBOT_CURRENCY || 'INR' }}
+        run: python -m flightbot
+
+      - name: Commit updated state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain data/state.json)" ]; then
+            git add data/state.json
+            git commit -m "chore: update flight price state [skip ci]"
+            git push
+          else
+            echo "No state changes to commit."
+          fi

@@ -1,0 +1,4 @@
+requests>=2.31,<3
+# Only needed for the Google Flights fallback scraper (the "google" provider).
+# Safe to keep installed even if you only use Travelpayouts.
+playwright>=1.44,<2
