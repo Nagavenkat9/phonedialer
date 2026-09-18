@@ -8,17 +8,8 @@
       "currency": "INR",
       "date": "2026-09-24",
       "destination": "TIR",
-      "history": [
-        [
-          "2026-09-18T05:12:02+00:00",
-          16878.0
-        ],
-        [
-          "2026-09-18T05:14:14+00:00",
-          16878.0
-        ]
-      ],
-      "last_price": 16878.0,
+      "history": [],
+      "last_price": null,
       "number": "732",
       "origin": "DEL",
       "target_price": null

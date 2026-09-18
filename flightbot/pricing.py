@@ -150,6 +150,68 @@ class GoogleFlightsProvider(PriceProvider):
 
 
 # --------------------------------------------------------------------------- #
+# Skyscanner — best-effort scrape (no key, aggregates OTA deals, fragile)
+# --------------------------------------------------------------------------- #
+class SkyscannerProvider(PriceProvider):
+    name = "skyscanner"
+
+    # Flight fares only: ignore stray small numbers (hotel "rooms from", ratings)
+    # and absurdly large ones.
+    _PRICE_RE = re.compile(r"₹\s?([0-9][0-9,]{3,})")
+    _MIN = 1500.0
+    _MAX = 300000.0
+
+    def cheapest(self, origin, destination, date, currency, carrier=None, number=None):
+        try:
+            from playwright.sync_api import sync_playwright  # lazy: optional dep
+        except ImportError:
+            raise ProviderError("playwright not installed; skyscanner unavailable")
+
+        # Skyscanner wants the date as YYMMDD.
+        try:
+            yymmdd = date[2:4] + date[5:7] + date[8:10]
+        except IndexError:
+            raise ProviderError(f"bad date {date!r}")
+        url = (
+            f"https://www.skyscanner.co.in/transport/flights/"
+            f"{origin.lower()}/{destination.lower()}/{yymmdd}/"
+            "?adultsv2=1&cabinclass=economy&rtn=0&preferdirects=true"
+        )
+        text = ""
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page(
+                    locale="en-IN",
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/125.0.0.0 Safari/537.36"
+                    ),
+                )
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                # Results stream in after an initial poll; give them time.
+                page.wait_for_timeout(9000)
+                text = page.inner_text("body")
+            finally:
+                browser.close()
+
+        prices = [
+            v
+            for m in self._PRICE_RE.findall(text)
+            if self._MIN <= (v := float(m.replace(",", ""))) <= self._MAX
+        ]
+        if not prices:
+            return None
+        return FareResult(
+            price=min(prices),
+            currency="INR",
+            source=self.name,
+            note="scraped route cheapest",
+        )
+
+
+# --------------------------------------------------------------------------- #
 # Amadeus — optional, only when enterprise credentials exist
 # --------------------------------------------------------------------------- #
 class AmadeusProvider(PriceProvider):
@@ -192,6 +254,8 @@ def build_providers(cfg: Config) -> list[PriceProvider]:
     for name in cfg.providers:
         if name == "travelpayouts" and cfg.has_travelpayouts:
             built.append(TravelpayoutsProvider(cfg.travelpayouts_token))
+        elif name == "skyscanner":
+            built.append(SkyscannerProvider())
         elif name == "google":
             built.append(GoogleFlightsProvider())
         elif name == "amadeus" and cfg.has_amadeus:

@@ -141,8 +141,14 @@ def _resolve_chat(watch: Watch, state: State, cfg: Config) -> int | None:
     return watch.chat_id or state.default_chat_id or cfg.allowed_chat_id or None
 
 
-def check_prices(tg: Telegram, providers, state: State, cfg: Config) -> None:
-    """Query each watched flight and alert when its fare drops or hits target."""
+def check_prices(
+    tg: Telegram, providers, state: State, cfg: Config, announce_all: bool = False
+) -> None:
+    """Query each watched flight and alert when its fare drops or hits target.
+
+    When ``announce_all`` is set (a manual /check), also report the current fare
+    even if it hasn't dropped, so the user always gets a reply.
+    """
     now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     for watch in state.watches.values():
         fare = cheapest_across(
@@ -189,6 +195,14 @@ def check_prices(tg: Telegram, providers, state: State, cfg: Config) -> None:
                 f"<b>{fare.currency} {price:,.0f}</b> (target "
                 f"{fare.currency} {watch.target_price:,.0f}){src}"
             )
+        elif announce_all:
+            trend = ""
+            if prev is not None:
+                trend = " (no change)" if price == prev else f" (up from {prev:,.0f})"
+            alert = (
+                f"ℹ️ {watch.flight_number} {watch.origin}→{watch.destination} "
+                f"on {watch.date}: <b>{fare.currency} {price:,.0f}</b>{trend}{src}"
+            )
 
         watch.last_price = price
         if alert and chat_id:
@@ -214,5 +228,5 @@ def run(cfg: Config, state: State) -> State:
     # A cron tick always checks; /check just makes the intent explicit in logs.
     if force_check:
         print("[info] forced check requested via /check")
-    check_prices(tg, providers, state, cfg)
+    check_prices(tg, providers, state, cfg, announce_all=force_check)
     return state
