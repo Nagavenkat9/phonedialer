@@ -16,7 +16,7 @@ from pathlib import Path
 STATE_FILE = Path(os.environ.get("FLIGHTBOT_STATE_FILE", "data/state.json"))
 
 # Default order in which price providers are tried; first hit wins.
-DEFAULT_PROVIDERS = ("travelpayouts", "google", "amadeus")
+DEFAULT_PROVIDERS = ("skyscanner", "travelpayouts", "google", "amadeus")
 
 
 @dataclass(frozen=True)
