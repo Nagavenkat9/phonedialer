@@ -4,15 +4,20 @@
   "watches": {
     "6E732-DEL-TIR-2026-09-24": {
       "carrier": "6E",
+      "chat_id": 0,
+      "currency": "INR",
+      "date": "2026-09-24",
+      "destination": "TIR",
+      "history": [
+        [
+          "2026-09-18T05:12:02+00:00",
+          16878.0
+        ]
+      ],
+      "last_price": 16878.0,
       "number": "732",
       "origin": "DEL",
-      "destination": "TIR",
-      "date": "2026-09-24",
-      "chat_id": 0,
-      "target_price": null,
-      "last_price": null,
-      "currency": "INR",
-      "history": []
+      "target_price": null
     }
   }
 }
