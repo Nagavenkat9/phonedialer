@@ -32,13 +32,18 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Install Chromium for the scraper fallback
+        run: python -m playwright install --with-deps chromium
+
       - name: Run price watcher
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
           AMADEUS_API_KEY: ${{ secrets.AMADEUS_API_KEY }}
           AMADEUS_API_SECRET: ${{ secrets.AMADEUS_API_SECRET }}
-          AMADEUS_ENV: ${{ vars.AMADEUS_ENV || 'test' }}
+          AMADEUS_ENV: ${{ vars.AMADEUS_ENV || 'production' }}
+          FLIGHTBOT_PROVIDERS: ${{ vars.FLIGHTBOT_PROVIDERS || 'travelpayouts,google' }}
           FLIGHTBOT_CURRENCY: ${{ vars.FLIGHTBOT_CURRENCY || 'INR' }}
         run: python -m flightbot
 

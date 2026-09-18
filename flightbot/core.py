@@ -13,8 +13,8 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from .amadeus import Amadeus, AmadeusError
 from .config import Config
+from .pricing import build_providers, cheapest_across
 from .storage import State, Watch
 from .telegram import Telegram
 
@@ -141,22 +141,19 @@ def _resolve_chat(watch: Watch, state: State, cfg: Config) -> int | None:
     return watch.chat_id or state.default_chat_id or cfg.allowed_chat_id or None
 
 
-def check_prices(tg: Telegram, amadeus: Amadeus, state: State, cfg: Config) -> None:
+def check_prices(tg: Telegram, providers, state: State, cfg: Config) -> None:
     """Query each watched flight and alert when its fare drops or hits target."""
     now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     for watch in state.watches.values():
-        try:
-            fare = amadeus.cheapest_fare_for_flight(
-                carrier=watch.carrier,
-                number=watch.number,
-                origin=watch.origin,
-                destination=watch.destination,
-                date=watch.date,
-                currency=watch.currency,
-            )
-        except AmadeusError as exc:
-            print(f"[warn] fare lookup failed for {watch.id}: {exc}")
-            continue
+        fare = cheapest_across(
+            providers,
+            origin=watch.origin,
+            destination=watch.destination,
+            date=watch.date,
+            currency=watch.currency,
+            carrier=watch.carrier,
+            number=watch.number,
+        )
 
         if fare is None:
             print(f"[info] no fare found for {watch.flight_number} on {watch.date}")
@@ -167,12 +164,16 @@ def check_prices(tg: Telegram, amadeus: Amadeus, state: State, cfg: Config) -> N
         chat_id = _resolve_chat(watch, state, cfg)
         prev = watch.last_price
 
+        # "route cheapest" fares aren't guaranteed to be this exact flight;
+        # say so in the alert so the price is never misleading.
+        src = f"\n<i>via {fare.source} · {fare.note}</i>" if fare.note else ""
+
         alert = None
         if prev is None:
             alert = (
                 f"👀 Now watching <b>{watch.flight_number}</b> "
                 f"{watch.origin}→{watch.destination} on {watch.date}.\n"
-                f"Current fare: <b>{fare.currency} {price:,.0f}</b>"
+                f"Current fare: <b>{fare.currency} {price:,.0f}</b>{src}"
             )
         elif price < prev:
             drop = prev - price
@@ -180,13 +181,13 @@ def check_prices(tg: Telegram, amadeus: Amadeus, state: State, cfg: Config) -> N
                 f"📉 <b>Price drop!</b> {watch.flight_number} "
                 f"{watch.origin}→{watch.destination} on {watch.date}\n"
                 f"{fare.currency} {prev:,.0f} → <b>{fare.currency} {price:,.0f}</b> "
-                f"(down {fare.currency} {drop:,.0f})"
+                f"(down {fare.currency} {drop:,.0f}){src}"
             )
         elif watch.target_price is not None and price <= watch.target_price:
             alert = (
                 f"🎯 {watch.flight_number} is at or below your target: "
                 f"<b>{fare.currency} {price:,.0f}</b> (target "
-                f"{fare.currency} {watch.target_price:,.0f})"
+                f"{fare.currency} {watch.target_price:,.0f}){src}"
             )
 
         watch.last_price = price
@@ -200,16 +201,18 @@ def run(cfg: Config, state: State) -> State:
     """One full tick: process commands, then check prices."""
     tg = Telegram(cfg.telegram_token)
 
-    # Commands work even without Amadeus, so process them first.
+    # Commands work regardless of price providers, so process them first.
     force_check = process_updates(tg, state, cfg)
 
-    if not cfg.has_amadeus:
-        print("[warn] Amadeus credentials missing; skipping price checks.")
+    providers = build_providers(cfg)
+    if not providers:
+        print("[warn] no usable price providers configured; skipping price checks. "
+              "Set TRAVELPAYOUTS_TOKEN and/or install playwright for the scraper.")
         return state
 
-    amadeus = Amadeus(cfg.amadeus_key, cfg.amadeus_secret, cfg.amadeus_base_url)
+    print(f"[info] price providers: {', '.join(p.name for p in providers)}")
     # A cron tick always checks; /check just makes the intent explicit in logs.
     if force_check:
         print("[info] forced check requested via /check")
-    check_prices(tg, amadeus, state, cfg)
+    check_prices(tg, providers, state, cfg)
     return state
