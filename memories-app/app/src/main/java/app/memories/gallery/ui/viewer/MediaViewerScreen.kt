@@ -1,5 +1,11 @@
 package app.memories.gallery.ui.viewer
 
+import android.app.Activity
+import android.content.IntentSender
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,6 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,24 +37,31 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -66,26 +80,97 @@ import app.memories.gallery.data.GalleryItem
 import app.memories.gallery.ui.AppViewModel
 import app.memories.gallery.ui.components.DarkSystemBars
 import app.memories.gallery.util.Fmt
+import app.memories.gallery.util.Trash
 import app.memories.gallery.util.shareMedia
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 
 @Composable
 fun MediaViewerScreen(vm: AppViewModel, onBack: () -> Unit, onPlayVideo: (String) -> Unit) {
-    val items = vm.viewerItems
+    // Local copy so deletions take effect immediately, before the VM's MediaStore reload lands.
+    var items by remember { mutableStateOf(vm.viewerItems) }
     if (items.isEmpty()) {
         Box(Modifier.fillMaxSize().background(Color.Black))
         return
     }
     DarkSystemBars()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val hidden by vm.hiddenItems.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState(initialPage = vm.viewerIndex.coerceIn(0, items.lastIndex)) { items.size }
     var chrome by remember { mutableStateOf(true) }
     var info by remember { mutableStateOf<GalleryItem?>(null) }
+    var confirmDelete by remember { mutableStateOf<GalleryItem?>(null) }
+    var pendingDelete by remember { mutableStateOf<GalleryItem?>(null) }
     val current = items[pagerState.currentPage.coerceIn(0, items.lastIndex)]
+
+    fun removeItem(item: GalleryItem, message: String) {
+        val idx = items.indexOfFirst { it.key == item.key }
+        if (idx < 0) return
+        val newList = items.toMutableList().apply { removeAt(idx) }
+        items = newList
+        if (newList.isEmpty()) {
+            vm.openViewer(emptyList(), 0)
+            onBack()
+            return
+        }
+        // Stay on the same position: shows the next item, or the previous one if we deleted the last.
+        val newIndex = idx.coerceAtMost(newList.lastIndex)
+        vm.openViewer(newList, newIndex)
+        scope.launch { pagerState.scrollToPage(newIndex) }
+        scope.launch { snackbar.showSnackbar(message) }
+    }
+
+    fun showError() {
+        scope.launch { snackbar.showSnackbar("Couldn't delete this item") }
+    }
+
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        val item = pendingDelete
+        pendingDelete = null
+        if (item == null || result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        if (Trash.supportsTrash) {
+            removeItem(item, "Moved to trash")
+        } else {
+            // API 29: consent granted via RecoverableSecurityException; retry the delete.
+            when (Trash.deletePermanently(context.contentResolver, item.uri)) {
+                is Trash.DeleteResult.Deleted -> removeItem(item, "Deleted")
+                else -> showError()
+            }
+        }
+    }
+
+    fun launchSender(item: GalleryItem, sender: IntentSender) {
+        pendingDelete = item
+        deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
+    }
+
+    fun deleteLegacy(item: GalleryItem) {
+        when (val r = Trash.deletePermanently(context.contentResolver, item.uri)) {
+            is Trash.DeleteResult.Deleted -> removeItem(item, "Deleted")
+            is Trash.DeleteResult.NeedsConsent -> launchSender(item, r.intentSender)
+            is Trash.DeleteResult.Failed -> showError()
+        }
+    }
+
+    fun requestDelete(item: GalleryItem) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val sender = try {
+                Trash.trashRequest(context.contentResolver, listOf(item.uri))
+            } catch (e: Exception) {
+                null
+            }
+            if (sender != null) launchSender(item, sender) else showError()
+        } else {
+            confirmDelete = item
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         HorizontalPager(
@@ -158,23 +243,55 @@ fun MediaViewerScreen(vm: AppViewModel, onBack: () -> Unit, onPlayVideo: (String
                     if (isHidden) "Show in memories" else "Hide from memories",
                 ) { if (isHidden) vm.showInMemories(current.key) else vm.hideFromMemories(current.key) }
                 BarAction(Icons.Outlined.Info, "Info") { info = current }
+                BarAction(Icons.Outlined.Delete, "Delete") { requestDelete(current) }
             }
         }
+
+        SnackbarHost(
+            hostState = snackbar,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 88.dp),
+        )
     }
 
     info?.let { InfoSheet(it, inMemories = it.key !in hidden, onDismiss = { info = null }) }
+
+    confirmDelete?.let { item ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Delete permanently?") },
+            text = { Text("This can't be undone on this Android version.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = null
+                    deleteLegacy(item)
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = null }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
 @Composable
-private fun BarAction(
+private fun RowScope.BarAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     tint: Color = Color.White,
     onClick: () -> Unit,
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(88.dp)) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
         IconButton(onClick = onClick) { Icon(icon, label, tint = tint) }
-        Text(label, color = Color.White, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        Text(
+            label,
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
