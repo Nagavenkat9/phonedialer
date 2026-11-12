@@ -10,12 +10,14 @@ on:
       - ".github/workflows/memories-android.yml"
       - ".github/scripts/**"
       - "!memories-app/screenshots/**"
+      - "!memories-app/dist/**"
   pull_request:
     paths:
       - "memories-app/**"
       - ".github/workflows/memories-android.yml"
       - ".github/scripts/**"
       - "!memories-app/screenshots/**"
+      - "!memories-app/dist/**"
   workflow_dispatch: {}
 
 jobs:
@@ -111,7 +113,8 @@ jobs:
           git checkout -B "$GITHUB_REF_NAME" "origin/$GITHUB_REF_NAME"
           rm -rf memories-app/screenshots && mkdir -p memories-app/screenshots
           cp screenshots/*.png screenshots/REPORT.md memories-app/screenshots/ 2>/dev/null || true
-          git add memories-app/screenshots
+          mkdir -p memories-app/dist && cp apk/*.apk memories-app/dist/Memories.apk
+          git add memories-app/screenshots memories-app/dist
           git diff --cached --quiet && exit 0
-          git commit -m "Update UI screenshots from emulator check [skip ci]"
+          git commit -m "Update UI screenshots and APK from emulator check [skip ci]"
           for i in 1 2 3; do git push origin "HEAD:$GITHUB_REF_NAME" && break; git pull --rebase origin "$GITHUB_REF_NAME"; done
