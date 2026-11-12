@@ -9,9 +9,14 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import app.memories.gallery.ui.settings.SettingsStore
+import app.memories.gallery.ui.settings.ThemeMode
 
 val GoogleBlue = Color(0xFF1A73E8)
 
@@ -55,6 +60,23 @@ private val AppTypography = base.copy(
     titleMedium = base.titleMedium.copy(fontWeight = FontWeight.Medium),
     headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Medium),
 )
+
+/**
+ * Theme driven by the user's choices in [SettingsStore]; changes apply live.
+ */
+@Composable
+fun MemoriesAppTheme(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val store = remember(context) { SettingsStore.get(context) }
+    val mode by store.themeMode.collectAsState()
+    val dynamic by store.dynamicColor.collectAsState()
+    val dark = when (mode) {
+        ThemeMode.System -> isSystemInDarkTheme()
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
+    }
+    MemoriesTheme(darkTheme = dark, dynamicColor = dynamic, content = content)
+}
 
 @Composable
 fun MemoriesTheme(
