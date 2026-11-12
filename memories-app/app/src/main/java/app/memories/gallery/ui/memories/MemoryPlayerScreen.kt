@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.MusicOff
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.OndemandVideo
@@ -83,6 +85,8 @@ import androidx.media3.ui.PlayerView
 import app.memories.gallery.R
 import app.memories.gallery.data.GalleryItem
 import app.memories.gallery.memories.Memory
+import app.memories.gallery.music.MusicChoice
+import app.memories.gallery.music.MusicLibrary
 import app.memories.gallery.ui.AppViewModel
 import app.memories.gallery.ui.components.DarkSystemBars
 import app.memories.gallery.ui.components.DaySheet
@@ -145,6 +149,8 @@ private fun MemoryPlayer(
     val snackbar = remember { SnackbarHostState() }
     val preparedKey = remember { arrayOfNulls<String>(1) }
     var restartTick by remember { mutableIntStateOf(0) }
+    var musicChoice by remember { mutableStateOf(MusicLibrary.loadChoice(context)) }
+    var showMusic by remember { mutableStateOf(false) }
 
     val player = remember {
         ExoPlayer.Builder(context).build().apply { repeatMode = Player.REPEAT_MODE_OFF }
@@ -159,6 +165,9 @@ private fun MemoryPlayer(
         return
     }
     val current = items[index.coerceIn(0, items.lastIndex)]
+
+    // Background music: duck under a playing (unmuted) video, full volume for photos.
+    MemoryMusic(choice = musicChoice, paused = paused, duck = current.isVideo && !muted)
 
     fun next() {
         if (index < items.lastIndex) index++ else close()
@@ -307,6 +316,13 @@ private fun MemoryPlayer(
                     )
                 }
                 if (paused) Icon(Icons.Filled.Pause, "Paused", tint = Color.White)
+                IconButton(onClick = { showMusic = true; paused = true }) {
+                    Icon(
+                        if (musicChoice == MusicChoice.None) Icons.Outlined.MusicOff else Icons.Outlined.MusicNote,
+                        "Music",
+                        tint = Color.White,
+                    )
+                }
                 IconButton(onClick = { showDay = true; paused = true }) {
                     Icon(Icons.Outlined.Info, "About this day", tint = Color.White)
                 }
@@ -410,6 +426,19 @@ private fun MemoryPlayer(
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .padding(bottom = 80.dp),
+        )
+    }
+
+    if (showMusic) {
+        MusicPickerSheet(
+            current = musicChoice,
+            onChoose = { choice ->
+                musicChoice = choice
+                MusicLibrary.saveChoice(context, choice)
+                showMusic = false
+                paused = false
+            },
+            onDismiss = { showMusic = false; paused = false },
         )
     }
 
