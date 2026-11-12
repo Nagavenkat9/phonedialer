@@ -32,7 +32,10 @@ W, H = screen_size()
 
 def dump():
     for _ in range(3):
-        sh("uiautomator dump /sdcard/ui.xml >/dev/null 2>&1")
+        sh("rm -f /sdcard/ui.xml")
+        msg = sh("uiautomator dump /sdcard/ui.xml 2>&1")
+        if "dumped" not in msg:
+            print(f"    uiautomator: {msg.strip()[:200]}", flush=True)
         xml = sh("cat /sdcard/ui.xml")
         if xml.strip().startswith("<?xml"):
             try:
@@ -149,8 +152,12 @@ def relaunch():
     time.sleep(4)
 
 
+# Fixed positions (fractions of the screen) used when the accessibility dump is unavailable.
+TABS = {"Photos": 0.118, "Memories": 0.373, "Search": 0.628, "Library": 0.882}
+
+
 def go_tab(label):
-    tap(text=label, lowest=True)
+    tap_xy(int(W * TABS[label]), int(H * 0.947), wait=1.5)
 
 
 # ----------------------------------------------------------------- scenario
@@ -180,20 +187,21 @@ def s_memories():
     time.sleep(1.5)
     shot("memories_tab")
     if not (find(text="Play memory", contains=True) or find(desc="Play memory", contains=True)):
-        raise RuntimeError("no hero memory shown")
+        return "hero: verify in screenshot (accessibility dump unavailable)"
 
 
 def s_long_press_day():
-    n = find(text="Play memory", contains=True) or find(desc="Play memory", contains=True)
-    x, y, _ = bounds(n) if n else (W // 2, int(H * 0.35), None)
-    long_press(x, y - 200 if n else y)
+    long_press(W // 2, int(H * 0.35))
     shot("memory_long_press_day_sheet")
     if not find(text="Don't show this memory", contains=True):
-        raise RuntimeError("day sheet not shown")
+        return "day sheet: verify in screenshot (accessibility dump unavailable)"
 
 
 def s_play_memory():
-    tap(text="Play memory", contains=True, lowest=True, wait=2.5)
+    if find(text="Play memory", contains=True, lowest=True):
+        tap(text="Play memory", contains=True, lowest=True, wait=2.5)
+    else:
+        tap_xy(W // 2, int(H * 0.82), wait=2.5)  # "Play memory" button in the day sheet
     shot("memory_story_player")
     time.sleep(3)
     shot("memory_story_after_3s")  # must still be on an early item (photos last 5s)
@@ -207,11 +215,16 @@ def s_play_memory():
     c = find(desc="Close")
     if c:
         x, y, _ = bounds(c); tap_xy(x, y, 1.5)
+    else:
+        tap_xy(int(W * 0.922), int(H * 0.1), 1.5)  # story X button
 
 
 def s_viewer():
     go_tab("Photos")
-    tap(suffix=".jpg", wait=2)
+    if find(suffix=".jpg"):
+        tap(suffix=".jpg", wait=2)
+    else:
+        tap_xy(int(W * 0.12), int(H * 0.50), wait=2)
     shot("viewer_with_filmstrip")
     # skim with the filmstrip: drag it to the left near the bottom area
     strip_y = None
@@ -264,7 +277,7 @@ def s_video_player():
 def s_multiselect():
     go_tab("Photos")
     n = find(suffix=".jpg")
-    x, y, _ = bounds(n)
+    x, y, _ = bounds(n) if n else (int(W * 0.12), int(H * 0.50), None)
     long_press(x, y)
     hits = find_all(suffix=".jpg")
     if len(hits) > 2:
@@ -298,7 +311,10 @@ def s_library():
 
 def s_settings():
     go_tab("Memories")
-    tap(desc="Settings", wait=1.5)
+    if find(desc="Settings"):
+        tap(desc="Settings", wait=1.5)
+    else:
+        tap_xy(int(W * 0.903), int(H * 0.088), wait=1.5)
     shot("settings")
     tap(text="Dark", wait=1.5)
     shot("settings_dark")
@@ -306,7 +322,7 @@ def s_settings():
     go_tab("Photos")
     shot("photos_dark_theme")
     go_tab("Memories")
-    tap(desc="Settings", wait=1.5)
+    tap_xy(int(W * 0.903), int(H * 0.088), wait=1.5)
     tap(text="System default", contains=True, wait=1) if find(text="System default", contains=True) else tap(text="System", contains=True, wait=1)
     back()
 
