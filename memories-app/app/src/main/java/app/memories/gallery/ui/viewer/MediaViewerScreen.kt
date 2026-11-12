@@ -7,6 +7,24 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -59,7 +77,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
@@ -85,7 +102,6 @@ import app.memories.gallery.util.shareMedia
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import java.time.LocalDate
-import kotlinx.coroutines.launch
 
 @Composable
 fun MediaViewerScreen(vm: AppViewModel, onBack: () -> Unit, onPlayVideo: (String) -> Unit) {
@@ -224,11 +240,18 @@ fun MediaViewerScreen(vm: AppViewModel, onBack: () -> Unit, onPlayVideo: (String
         ) {
             val fav = current.key in favorites
             val isHidden = current.key in hidden
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
+                    .navigationBarsPadding()
+                    .padding(top = 24.dp),
+            ) {
+            // Nothing-style filmstrip: drag it to skim through everything quickly.
+            if (items.size > 1) Filmstrip(items = items, pagerState = pagerState)
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))))
-                    .navigationBarsPadding()
                     .padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
@@ -245,6 +268,7 @@ fun MediaViewerScreen(vm: AppViewModel, onBack: () -> Unit, onPlayVideo: (String
                 BarAction(Icons.Outlined.Info, "Info") { info = current }
                 BarAction(Icons.Outlined.Delete, "Delete") { requestDelete(current) }
             }
+            }
         }
 
         SnackbarHost(
@@ -252,7 +276,7 @@ fun MediaViewerScreen(vm: AppViewModel, onBack: () -> Unit, onPlayVideo: (String
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 88.dp),
+                .padding(bottom = 160.dp),
         )
     }
 
@@ -425,5 +449,92 @@ private fun InfoRow(label: String, value: String) {
             modifier = Modifier.width(110.dp),
         )
         Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+private val StripThumbWidth = 38.dp
+
+/** Index of the filmstrip item closest to the horizontal centre of the strip. */
+private fun centerIndex(state: LazyListState): Int {
+    val info = state.layoutInfo
+    val center = (info.viewportStartOffset + info.viewportEndOffset) / 2
+    return info.visibleItemsInfo.minByOrNull { kotlin.math.abs(it.offset + it.size / 2 - center) }?.index ?: -1
+}
+
+/**
+ * Thumbnail scrubber synced with the pager.
+ *  - swipe the big photo → the strip follows and centres the current item
+ *  - drag/fling the strip → the photo under the centre is shown instantly
+ *  - tap a thumbnail → jump to it
+ */
+@Composable
+private fun Filmstrip(items: List<GalleryItem>, pagerState: PagerState) {
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = pagerState.currentPage)
+    val dragged by listState.interactionSource.collectIsDraggedAsState()
+    var userScrolling by remember { mutableStateOf(false) }
+
+    LaunchedEffect(dragged) { if (dragged) userScrolling = true }
+    // When the user's drag + fling settles, snap the current item to the centre.
+    LaunchedEffect(dragged, listState.isScrollInProgress) {
+        if (userScrolling && !dragged && !listState.isScrollInProgress) {
+            userScrolling = false
+            listState.animateScrollToItem(pagerState.currentPage)
+        }
+    }
+    // Strip → pager.
+    LaunchedEffect(listState, items) {
+        snapshotFlow { if (userScrolling) centerIndex(listState) else -1 }
+            .distinctUntilChanged()
+            .collect { idx ->
+                if (idx in items.indices && idx != pagerState.currentPage) pagerState.scrollToPage(idx)
+            }
+    }
+    // Pager → strip.
+    LaunchedEffect(pagerState, items) {
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            if (!userScrolling && page in items.indices) listState.animateScrollToItem(page)
+        }
+    }
+
+    BoxWithConstraints(Modifier.fillMaxWidth().height(64.dp)) {
+        val side = ((maxWidth - StripThumbWidth) / 2).coerceAtLeast(0.dp)
+        LazyRow(
+            state = listState,
+            contentPadding = PaddingValues(horizontal = side),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            itemsIndexed(items, key = { _, it -> it.key }) { i, item ->
+                val active = i == pagerState.currentPage
+                val h by animateDpAsState(if (active) 60.dp else 46.dp, label = "stripHeight")
+                val shape = RoundedCornerShape(6.dp)
+                Box(
+                    Modifier
+                        .width(StripThumbWidth)
+                        .height(h)
+                        .clip(shape)
+                        .background(Color.DarkGray)
+                        .then(if (active) Modifier.border(2.dp, Color.White, shape) else Modifier)
+                        .clickable { scope.launch { pagerState.scrollToPage(i) } },
+                ) {
+                    AsyncImage(
+                        model = item.uri,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    if (item.isVideo) {
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            null,
+                            tint = Color.White,
+                            modifier = Modifier.align(Alignment.Center).size(16.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
