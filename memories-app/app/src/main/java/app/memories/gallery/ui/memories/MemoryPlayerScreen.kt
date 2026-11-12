@@ -133,6 +133,8 @@ private fun MemoryPlayer(
 ) {
     DarkSystemBars()
     val context = LocalContext.current
+    val storySeconds by app.memories.gallery.ui.settings.SettingsStore.get(context).storyDurationSeconds.collectAsStateWithLifecycle()
+    val photoDurationMs = (storySeconds.coerceIn(1, 30) * 1000).takeIf { it > 0 } ?: PHOTO_DURATION_MS
     val scope = rememberCoroutineScope()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val close by rememberUpdatedState(onClose)
@@ -199,8 +201,20 @@ private fun MemoryPlayer(
             return@LaunchedEffect
         }
         if (!current.isVideo) {
-            val remaining = ((1f - progress.value) * PHOTO_DURATION_MS).toInt().coerceAtLeast(1)
-            progress.animateTo(1f, tween(remaining, easing = LinearEasing))
+            // Clock-driven (not an animation) so it still lasts the full duration when the
+            // system "remove animations" setting is on.
+            val totalMs = photoDurationMs.toFloat()
+            val startFraction = progress.value
+            val t0 = android.os.SystemClock.uptimeMillis()
+            while (true) {
+                val f = startFraction + (android.os.SystemClock.uptimeMillis() - t0) / totalMs
+                if (f >= 1f) {
+                    progress.snapTo(1f)
+                    break
+                }
+                progress.snapTo(f)
+                delay(16)
+            }
             next()
         } else {
             player.play()

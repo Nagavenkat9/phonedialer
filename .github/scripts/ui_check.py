@@ -119,8 +119,16 @@ def alive():
     return sh(f"pidof {PKG}").strip() != ""
 
 
+def foreground():
+    out = sh("dumpsys activity activities | grep -E 'topResumedActivity|mResumedActivity'")
+    return PKG in out
+
+
 def step(name, fn):
     print(f"--- {name}", flush=True)
+    if not foreground():
+        print("    (app not in foreground, relaunching)", flush=True)
+        relaunch()
     try:
         note = fn() or ""
         status = "PASS"
@@ -171,22 +179,24 @@ def s_memories():
     go_tab("Memories")
     time.sleep(1.5)
     shot("memories_tab")
-    if not find(text="Play memory"):
+    if not (find(text="Play memory", contains=True) or find(desc="Play memory", contains=True)):
         raise RuntimeError("no hero memory shown")
 
 
 def s_long_press_day():
-    n = find(text="Play memory")
-    x, y, _ = bounds(n)
-    long_press(x, y - 200)
+    n = find(text="Play memory", contains=True) or find(desc="Play memory", contains=True)
+    x, y, _ = bounds(n) if n else (W // 2, int(H * 0.35), None)
+    long_press(x, y - 200 if n else y)
     shot("memory_long_press_day_sheet")
-    if not find(text="Play memory", contains=False) or not find(text="Don't show this memory"):
+    if not find(text="Don't show this memory", contains=True):
         raise RuntimeError("day sheet not shown")
 
 
 def s_play_memory():
-    tap(text="Play memory", lowest=True, wait=2.5)
+    tap(text="Play memory", contains=True, lowest=True, wait=2.5)
     shot("memory_story_player")
+    time.sleep(3)
+    shot("memory_story_after_3s")  # must still be on an early item (photos last 5s)
     tap_xy(int(W * 0.8), H // 2, wait=1.5)
     shot("memory_story_next")
     m = find(desc="music", contains=True)
@@ -194,7 +204,9 @@ def s_play_memory():
         x, y, _ = bounds(m); tap_xy(x, y, wait=2)
         shot("memory_music_picker")
         back()
-    back(1.5)
+    c = find(desc="Close")
+    if c:
+        x, y, _ = bounds(c); tap_xy(x, y, 1.5)
 
 
 def s_viewer():
