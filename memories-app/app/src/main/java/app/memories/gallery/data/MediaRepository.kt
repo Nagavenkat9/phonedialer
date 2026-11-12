@@ -3,12 +3,15 @@ package app.memories.gallery.data
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** Reads every photo and video on the device through MediaStore. */
 class MediaRepository(private val context: Context) {
+
+    private val locations by lazy { PhotoLocationReader(context) }
 
     suspend fun loadAll(): List<GalleryItem> = withContext(Dispatchers.IO) {
         val images = query(
@@ -19,7 +22,16 @@ class MediaRepository(private val context: Context) {
             collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
             isVideo = true,
         )
-        (images + videos).sortedByDescending { it.dateTaken }
+        val located = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                locations.applyLocations(images)
+            } catch (t: Throwable) {
+                images
+            }
+        } else {
+            images
+        }
+        (located + videos).sortedByDescending { it.dateTaken }
     }
 
     @Suppress("DEPRECATION")
@@ -37,6 +49,10 @@ class MediaRepository(private val context: Context) {
             add(MediaStore.Images.ImageColumns.BUCKET_ID)
             add(MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME)
             if (isVideo) add(MediaStore.Video.VideoColumns.DURATION)
+            if (!isVideo && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                add(MediaStore.Images.ImageColumns.LATITUDE)
+                add(MediaStore.Images.ImageColumns.LONGITUDE)
+            }
         }.toTypedArray()
 
         val out = ArrayList<GalleryItem>()
@@ -53,6 +69,9 @@ class MediaRepository(private val context: Context) {
             val bIdCol = c.getColumnIndex(MediaStore.Images.ImageColumns.BUCKET_ID)
             val bNameCol = c.getColumnIndex(MediaStore.Images.ImageColumns.BUCKET_DISPLAY_NAME)
             val durCol = if (isVideo) c.getColumnIndex(MediaStore.Video.VideoColumns.DURATION) else -1
+            val legacyLocation = !isVideo && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+            val latCol = if (legacyLocation) c.getColumnIndex(MediaStore.Images.ImageColumns.LATITUDE) else -1
+            val lonCol = if (legacyLocation) c.getColumnIndex(MediaStore.Images.ImageColumns.LONGITUDE) else -1
 
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
@@ -63,6 +82,16 @@ class MediaRepository(private val context: Context) {
                     taken > 0 -> taken
                     modified > 0 -> modified
                     else -> added
+                }
+                var lat: Double? = null
+                var lon: Double? = null
+                if (latCol >= 0 && lonCol >= 0 && !c.isNull(latCol) && !c.isNull(lonCol)) {
+                    val la = c.getDouble(latCol)
+                    val lo = c.getDouble(lonCol)
+                    if (PhotoLocationReader.isValid(la, lo)) {
+                        lat = la
+                        lon = lo
+                    }
                 }
                 out += GalleryItem(
                     id = id,
@@ -77,6 +106,8 @@ class MediaRepository(private val context: Context) {
                     bucketId = if (bIdCol >= 0) c.getString(bIdCol).orEmpty() else "",
                     bucketName = if (bNameCol >= 0) c.getString(bNameCol).orEmpty() else "",
                     sizeBytes = if (sizeCol >= 0) c.getLong(sizeCol) else 0L,
+                    latitude = lat,
+                    longitude = lon,
                 )
             }
         }

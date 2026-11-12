@@ -13,6 +13,7 @@ enum class MemoryKind {
     RECENT,
     MONTH_HIGHLIGHTS,
     VIDEOS_YEAR,
+    TRIP,
     THROWBACK;
 
     val isOnThisDay get() = this == ON_THIS_DAY || this == THIS_WEEK

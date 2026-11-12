@@ -92,6 +92,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.C
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -198,6 +200,14 @@ fun VideoPlayerScreen(item: GalleryItem, prefs: UserPrefs, onBack: () -> Unit) {
     var seekStart by remember { mutableLongStateOf(0L) }
     var seekTarget by remember { mutableLongStateOf(0L) }
     var wasPlaying by remember { mutableStateOf(false) }
+    var loop by remember { mutableStateOf(false) }
+    var abA by remember { mutableLongStateOf(-1L) }
+    var abB by remember { mutableLongStateOf(-1L) }
+    var tracks by remember { mutableStateOf(Tracks.EMPTY) }
+    var sleep by remember { mutableStateOf(SleepMode.Off) }
+    var pipRequested by remember { mutableStateOf(false) }
+    val inPip = rememberInPipMode(activity)
+    val pipAvailable = remember(activity) { activity?.let { supportsPip(it) } == true }
 
     // Player events.
     DisposableEffect(player) {
@@ -212,8 +222,12 @@ fun VideoPlayerScreen(item: GalleryItem, prefs: UserPrefs, onBack: () -> Unit) {
                 if (ended) controls = true
             }
 
+            override fun onTracksChanged(t: Tracks) {
+                tracks = t
+            }
+
             override fun onVideoSizeChanged(videoSize: VideoSize) {
-                if (manualOrientation || videoSize.width <= 0 || videoSize.height <= 0) return
+                if (manualOrientation || activity?.isInPictureInPictureMode == true || videoSize.width <= 0 || videoSize.height <= 0) return
                 var w = videoSize.width * videoSize.pixelWidthHeightRatio
                 var h = videoSize.height.toFloat()
                 if (videoSize.unappliedRotationDegrees == 90 || videoSize.unappliedRotationDegrees == 270) {
@@ -252,7 +266,61 @@ fun VideoPlayerScreen(item: GalleryItem, prefs: UserPrefs, onBack: () -> Unit) {
         }
     }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { player.pause() }
+    // Keep playing while shrinking into PiP; pause when actually backgrounded / PiP closed.
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        if (!pipRequested && activity?.isInPictureInPictureMode != true) player.pause()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { player.pause() }
+    LaunchedEffect(inPip) {
+        if (inPip) {
+            controls = false
+            hud = null
+            speedMenu = false
+        } else {
+            pipRequested = false
+        }
+    }
+
+    // A-B repeat: jump back to A whenever playback passes B.
+    LaunchedEffect(abA, abB) {
+        if (abA < 0 || abB <= abA) return@LaunchedEffect
+        while (true) {
+            if (!scrubbing && player.currentPosition >= abB) {
+                player.seekTo(abA)
+                position = abA
+            }
+            delay(50)
+        }
+    }
+
+    // Sleep timer.
+    LaunchedEffect(sleep) {
+        when {
+            sleep.minutes > 0 -> {
+                delay(sleep.minutes * 60_000L)
+                player.pause()
+                sleep = SleepMode.Off
+                hud = Hud.Message("Sleep timer: paused")
+            }
+            sleep == SleepMode.EndOfVideo -> {
+                // Stop at the end instead of looping or repeating A-B.
+                player.repeatMode = Player.REPEAT_MODE_OFF
+                loop = false
+                abA = -1L
+                abB = -1L
+                while (true) {
+                    val d = player.duration
+                    if (player.playbackState == Player.STATE_ENDED || (d > 0 && player.currentPosition >= d - 250)) {
+                        player.pause()
+                        sleep = SleepMode.Off
+                        hud = Hud.Message("Sleep timer: paused")
+                        break
+                    }
+                    delay(200)
+                }
+            }
+        }
+    }
 
     LaunchedEffect(player) {
         if (resumeFrom > 0) hud = Hud.Message("Resumed at ${Fmt.duration(resumeFrom)}")
@@ -311,6 +379,53 @@ fun VideoPlayerScreen(item: GalleryItem, prefs: UserPrefs, onBack: () -> Unit) {
         val seconds = if (cur != null && cur.dir == dir && now - cur.at < CHAIN_WINDOW_MS) cur.seconds + 10 else 10
         skip = Skip(dir, seconds, now)
         seekTo(player.currentPosition + dir * SKIP_MS)
+    }
+
+    fun toggleLoop() {
+        loop = !loop
+        player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        if (loop && sleep == SleepMode.EndOfVideo) sleep = SleepMode.Off
+        hud = Hud.Message(if (loop) "Loop on" else "Loop off")
+    }
+
+    fun abRepeat() {
+        val pos = player.currentPosition
+        when {
+            abA < 0 -> {
+                abA = pos
+                hud = Hud.Message("A set at ${Fmt.duration(pos)}")
+            }
+            abB < 0 -> {
+                if (pos <= abA + 500) {
+                    hud = Hud.Message("B must be after A")
+                } else {
+                    abB = pos
+                    if (sleep == SleepMode.EndOfVideo) sleep = SleepMode.Off
+                    player.seekTo(abA)
+                    position = abA
+                    hud = Hud.Message("Repeating A-B")
+                }
+            }
+            else -> {
+                abA = -1L
+                abB = -1L
+                hud = Hud.Message("A-B repeat off")
+            }
+        }
+        interaction++
+    }
+
+    fun startPip() {
+        val act = activity ?: return
+        val vs = player.videoSize
+        val w = (vs.width * vs.pixelWidthHeightRatio).roundToInt()
+        val h = vs.height
+        val (pw, ph) = if (vs.unappliedRotationDegrees == 90 || vs.unappliedRotationDegrees == 270) h to w else w to h
+        pipRequested = true
+        if (!enterPip(act, pw, ph)) {
+            pipRequested = false
+            hud = Hud.Message("Picture-in-picture unavailable")
+        }
     }
 
     fun rotate() {
@@ -458,13 +573,13 @@ fun VideoPlayerScreen(item: GalleryItem, prefs: UserPrefs, onBack: () -> Unit) {
                 },
         )
 
-        skip?.let { s ->
+        if (!inPip) skip?.let { s ->
             SkipBubble(s, Modifier.align(if (s.dir < 0) Alignment.CenterStart else Alignment.CenterEnd))
         }
 
-        hud?.let { HudView(it, duration, Modifier.align(Alignment.Center)) }
+        if (!inPip) hud?.let { HudView(it, duration, Modifier.align(Alignment.Center)) }
 
-        if (holdFast) {
+        if (holdFast && !inPip) {
             Surface(
                 shape = RoundedCornerShape(50),
                 color = Color.Black.copy(alpha = 0.6f),
@@ -480,7 +595,7 @@ fun VideoPlayerScreen(item: GalleryItem, prefs: UserPrefs, onBack: () -> Unit) {
 
         // Locked: only the unlock button.
         AnimatedVisibility(
-            visible = controls && locked,
+            visible = controls && locked && !inPip,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.CenterStart).padding(start = 24.dp),
@@ -493,7 +608,7 @@ fun VideoPlayerScreen(item: GalleryItem, prefs: UserPrefs, onBack: () -> Unit) {
         }
 
         AnimatedVisibility(
-            visible = controls && !locked,
+            visible = controls && !locked && !inPip,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.fillMaxSize(),
@@ -559,6 +674,33 @@ fun VideoPlayerScreen(item: GalleryItem, prefs: UserPrefs, onBack: () -> Unit) {
                         locked = true
                         hud = Hud.Message("Screen locked")
                     }) { Icon(Icons.Outlined.LockOpen, "Lock", tint = Color.White) }
+                    PlayerMoreMenu(
+                        tracks = tracks,
+                        loop = loop,
+                        abLabel = when {
+                            abA < 0 -> "A-B repeat: set A"
+                            abB < 0 -> "A-B repeat: set B"
+                            else -> "A-B repeat: clear"
+                        },
+                        sleep = sleep,
+                        pipAvailable = pipAvailable,
+                        onOpen = { interaction++ },
+                        onToggleLoop = { toggleLoop() },
+                        onAbRepeat = { abRepeat() },
+                        onSelectTrack = { t, type ->
+                            selectTrack(player, t, type)
+                            hud = Hud.Message(t.label)
+                        },
+                        onSubtitlesOff = {
+                            disableTrackType(player, C.TRACK_TYPE_TEXT)
+                            hud = Hud.Message("Subtitles off")
+                        },
+                        onSleep = { m ->
+                            sleep = m
+                            hud = Hud.Message(if (m == SleepMode.Off) "Sleep timer off" else "Sleep: ${m.label}")
+                        },
+                        onPip = { startPip() },
+                    )
                 }
 
                 // Centre controls.
@@ -588,8 +730,27 @@ fun VideoPlayerScreen(item: GalleryItem, prefs: UserPrefs, onBack: () -> Unit) {
                         .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))))
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
-                    Row(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(Fmt.duration(position), color = Color.White, style = MaterialTheme.typography.labelLarge)
+                        val badges = buildList {
+                            if (abA >= 0) {
+                                add("A " + Fmt.duration(abA) + if (abB >= 0) "  ·  B " + Fmt.duration(abB) else "  ·  B –")
+                            }
+                            if (loop) add("Loop")
+                            if (sleep != SleepMode.Off) add("Sleep: " + sleep.label)
+                        }
+                        if (badges.isNotEmpty()) {
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                badges.joinToString("   "),
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                        }
                         Spacer(Modifier.weight(1f))
                         Text(
                             "-" + Fmt.duration((duration - position).coerceAtLeast(0)) + "  /  " + Fmt.duration(duration),

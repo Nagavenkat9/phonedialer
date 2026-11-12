@@ -4,7 +4,14 @@ import app.memories.gallery.data.GalleryItem
 import app.memories.gallery.util.Fmt
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.temporal.ChronoUnit
 import java.time.temporal.IsoFields
+import kotlin.math.asin
+import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
@@ -203,6 +210,25 @@ object MemoryEngine {
                 )
             }
 
+        // 6b) Trips — runs of days spent far away from home.
+        val trips = detectTrips(pool, byDay, today)
+        weightedSample(trips, 3, rnd) { t -> t.items.size + 10.0 * t.items.count(isFav) }
+            .forEach { trip ->
+                rank(
+                    build(
+                        id = "trip-${trip.start}",
+                        kind = MemoryKind.TRIP,
+                        title = tripTitle(trip),
+                        subtitle = Fmt.relative(trip.start, today),
+                        items = trip.items,
+                        isFav = isFav,
+                        rnd = rnd,
+                        day = null,
+                    ),
+                    base = 400.0,
+                )
+            }
+
         // 7) Throwback to an older year.
         val oldYears = pool.groupBy { it.date.year }.entries.filter { it.key < today.year - 1 && it.value.size >= 10 }
         if (oldYears.isNotEmpty()) {
@@ -270,6 +296,114 @@ object MemoryEngine {
             day = day,
             favoriteCount = orderedFavs.size,
         )
+    }
+
+    private class Trip(val start: LocalDate, val end: LocalDate, val items: List<GalleryItem>)
+
+    private const val TRIP_MIN_DISTANCE_KM = 100.0
+    private const val TRIP_MIN_DAYS = 2
+    private const val TRIP_MAX_DAYS = 14
+    private const val TRIP_MIN_ITEMS = 10
+    private const val MIN_LOCATED_FOR_HOME = 20
+
+    /**
+     * Finds trips: consecutive days (gaps of at most one day) whose located photos are mostly
+     * more than [TRIP_MIN_DISTANCE_KM] from "home" — the most common ~0.1° grid cell.
+     */
+    private fun detectTrips(
+        pool: List<GalleryItem>,
+        byDay: Map<LocalDate, List<GalleryItem>>,
+        today: LocalDate,
+    ): List<Trip> {
+        val located = pool.filter { it.latitude != null && it.longitude != null }
+        if (located.size < MIN_LOCATED_FOR_HOME) return emptyList()
+
+        val homeCell = located
+            .groupBy { cellOf(it.latitude!!, it.longitude!!) }
+            .maxByOrNull { it.value.size }
+            ?.value ?: return emptyList()
+        val homeLat = homeCell.sumOf { it.latitude!! } / homeCell.size
+        val homeLon = homeCell.sumOf { it.longitude!! } / homeCell.size
+
+        val awayDays = located.groupBy { it.date }
+            .filter { (_, list) ->
+                val far = list.count {
+                    haversineKm(homeLat, homeLon, it.latitude!!, it.longitude!!) > TRIP_MIN_DISTANCE_KM
+                }
+                far * 2 >= list.size && far > 0
+            }
+            .keys
+            .sorted()
+        if (awayDays.isEmpty()) return emptyList()
+
+        // Group away days into runs, allowing a single missing day in between.
+        val runs = mutableListOf<MutableList<LocalDate>>()
+        for (d in awayDays) {
+            val last = runs.lastOrNull()?.lastOrNull()
+            if (last != null && ChronoUnit.DAYS.between(last, d) <= 2) {
+                runs.last() += d
+            } else {
+                runs += mutableListOf(d)
+            }
+        }
+
+        val out = mutableListOf<Trip>()
+        for (run in runs) {
+            val start = run.first()
+            val end = run.last()
+            val length = ChronoUnit.DAYS.between(start, end) + 1
+            if (length < TRIP_MIN_DAYS || length > TRIP_MAX_DAYS) continue
+            // Skip a trip that may still be in progress.
+            if (!end.isBefore(today.minusDays(1))) continue
+            val items = ArrayList<GalleryItem>()
+            var d = start
+            while (!d.isAfter(end)) {
+                items += byDay[d].orEmpty()
+                d = d.plusDays(1)
+            }
+            if (items.size < TRIP_MIN_ITEMS) continue
+            out += Trip(start, end, items)
+        }
+        return out
+    }
+
+    private fun tripTitle(trip: Trip): String {
+        val s = trip.start
+        val e = trip.end
+        val range = when {
+            s.year != e.year -> "${s.format(Fmt.short)} – ${e.format(Fmt.short)}"
+            s.month != e.month -> "${s.format(Fmt.dayMonth)} – ${e.format(Fmt.short)}"
+            else -> "${s.dayOfMonth}–${e.format(Fmt.short)}"
+        }
+        val bucket = trip.items
+            .map { it.bucketName.trim() }
+            .filter { it.isNotEmpty() }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+        val label = if (bucket != null && bucket.lowercase() !in GENERIC_BUCKETS) bucket else "Trip"
+        return "$label · $range"
+    }
+
+    private val GENERIC_BUCKETS = setOf(
+        "camera", "screenshots", "dcim", "pictures", "download", "downloads",
+        "whatsapp images", "100andro", "100media", "image", "images", "photos",
+    )
+
+    private fun cellOf(lat: Double, lon: Double): Long {
+        val a = floor(lat * 10.0).toLong()
+        val b = floor(lon * 10.0).toLong()
+        return a * 10_000L + b
+    }
+
+    private fun haversineKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val h = sin(dLat / 2).pow(2) +
+            cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
+        return 2 * r * asin(sqrt(h.coerceIn(0.0, 1.0)))
     }
 
     private fun <T> weightedSample(items: List<T>, n: Int, rnd: Random, weight: (T) -> Double): List<T> {

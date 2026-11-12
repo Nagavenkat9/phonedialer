@@ -21,7 +21,13 @@ data class GalleryItem(
     val bucketId: String,
     val bucketName: String,
     val sizeBytes: Long,
+    /** GPS latitude of a photo, if known. */
+    val latitude: Double? = null,
+    /** GPS longitude of a photo, if known. */
+    val longitude: Double? = null,
 ) {
+    val hasLocation: Boolean get() = latitude != null && longitude != null
+
     /** Stable key used for favorites / hidden lists. */
     val key: String = (if (isVideo) "v" else "i") + id
 
