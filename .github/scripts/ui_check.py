@@ -224,7 +224,7 @@ def s_viewer():
     if find(suffix=".jpg"):
         tap(suffix=".jpg", wait=2)
     else:
-        tap_xy(int(W * 0.12), int(H * 0.50), wait=2)
+        tap_xy(int(W * 0.12), int(H * 0.41), wait=2)
     shot("viewer_with_filmstrip")
     # skim with the filmstrip: drag it to the left near the bottom area
     strip_y = None
@@ -271,13 +271,14 @@ def s_video_player():
         shot("video_player_more_menu")
         back(0.8)
     back(1.5)
+    sh("settings put system user_rotation 0")
     back(1.5)
 
 
 def s_multiselect():
     go_tab("Photos")
     n = find(suffix=".jpg")
-    x, y, _ = bounds(n) if n else (int(W * 0.12), int(H * 0.50), None)
+    x, y, _ = bounds(n) if n else (int(W * 0.12), int(H * 0.41), None)
     long_press(x, y)
     hits = find_all(suffix=".jpg")
     if len(hits) > 2:

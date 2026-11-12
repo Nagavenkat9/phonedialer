@@ -7,6 +7,7 @@ adb wait-for-device
 adb shell settings put global window_animation_scale 0
 adb shell settings put global transition_animation_scale 0
 adb shell settings put global animator_duration_scale 0
+adb shell settings put secure immersive_mode_confirmations confirmed
 adb install -r -g "$APK"
 
 adb shell mkdir -p /sdcard/DCIM/Camera
