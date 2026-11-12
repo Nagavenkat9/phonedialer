@@ -4,9 +4,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -26,12 +28,14 @@ import app.memories.gallery.ui.components.DaySheet
 import app.memories.gallery.ui.library.LibraryScreen
 import app.memories.gallery.ui.memories.MemoriesScreen
 import app.memories.gallery.ui.photos.PhotosScreen
+import app.memories.gallery.ui.search.SearchScreen
 
 private data class Tab(val label: String, val selected: ImageVector, val unselected: ImageVector)
 
 private val tabs = listOf(
     Tab("Photos", Icons.Filled.Photo, Icons.Outlined.Photo),
     Tab("Memories", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome),
+    Tab("Search", Icons.Filled.Search, Icons.Outlined.Search),
     Tab("Library", Icons.Filled.PhotoLibrary, Icons.Outlined.PhotoLibrary),
 )
 
@@ -44,6 +48,7 @@ fun HomeScreen(
     onOpenHidden: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    if (tab !in tabs.indices) tab = 0
     var dayMemory by remember { mutableStateOf<Memory?>(null) }
 
     Scaffold(
@@ -74,6 +79,11 @@ fun HomeScreen(
                 onOpenMemory = onOpenMemory,
                 onShowDay = { dayMemory = it },
                 onOpenHidden = onOpenHidden,
+            )
+            2 -> SearchScreen(
+                vm = vm,
+                padding = padding,
+                onOpenViewer = onOpenViewer,
             )
             else -> LibraryScreen(
                 vm = vm,
