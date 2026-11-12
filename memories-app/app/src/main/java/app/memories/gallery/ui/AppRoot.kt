@@ -53,7 +53,11 @@ import app.memories.gallery.ui.library.CollectionScreen
 import app.memories.gallery.ui.library.HiddenScreen
 import app.memories.gallery.ui.memories.MemoryPlayerScreen
 import app.memories.gallery.ui.player.VideoPlayerScreen
+import app.memories.gallery.ui.settings.SettingsScreen
 import app.memories.gallery.ui.viewer.MediaViewerScreen
+
+/** Navigation route for the settings screen. */
+const val ROUTE_SETTINGS = "settings"
 
 private fun mediaPermissions(): Array<String> = when {
     Build.VERSION.SDK_INT >= 34 -> arrayOf(
@@ -157,6 +161,12 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
         }
         composable("hidden") {
             HiddenScreen(vm = vm, onBack = { nav.back() })
+        }
+        composable(ROUTE_SETTINGS) {
+            SettingsScreen(
+                onBack = { nav.back() },
+                onOpenHidden = { nav.navigate("hidden") },
+            )
         }
     }
 }

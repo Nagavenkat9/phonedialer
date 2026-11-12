@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +47,7 @@ fun MemoriesScreen(
     onOpenMemory: (String) -> Unit,
     onShowDay: (Memory) -> Unit,
     onOpenHidden: () -> Unit,
+    onOpenSettings: () -> Unit = {},
 ) {
     val memories by vm.memories.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
@@ -54,6 +56,9 @@ fun MemoriesScreen(
         ScreenHeader("Memories") {
             IconButton(onClick = onOpenHidden) {
                 Icon(Icons.Outlined.VisibilityOff, contentDescription = "Hidden from memories")
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Outlined.Settings, contentDescription = "Settings")
             }
         }
         if (memories.isEmpty()) {
