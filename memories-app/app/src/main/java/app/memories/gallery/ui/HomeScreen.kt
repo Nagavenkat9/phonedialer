@@ -46,6 +46,7 @@ fun HomeScreen(
     onOpenMemory: (String) -> Unit,
     onOpenCollection: (String) -> Unit,
     onOpenHidden: () -> Unit,
+    onOpenSettings: () -> Unit = {},
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     if (tab !in tabs.indices) tab = 0
@@ -79,6 +80,7 @@ fun HomeScreen(
                 onOpenMemory = onOpenMemory,
                 onShowDay = { dayMemory = it },
                 onOpenHidden = onOpenHidden,
+                onOpenSettings = onOpenSettings,
             )
             2 -> SearchScreen(
                 vm = vm,

@@ -65,4 +65,6 @@ dependencies {
     implementation("io.coil-kt:coil-video:2.7.0")
 
     implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 }

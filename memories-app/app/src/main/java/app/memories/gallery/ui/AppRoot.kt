@@ -49,6 +49,7 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import app.memories.gallery.notify.RequestNotificationPermission
 import app.memories.gallery.ui.library.CollectionScreen
 import app.memories.gallery.ui.library.HiddenScreen
 import app.memories.gallery.ui.memories.MemoryPlayerScreen
@@ -82,7 +83,11 @@ private fun NavController.back() {
 }
 
 @Composable
-fun AppRoot(vm: AppViewModel = viewModel()) {
+fun AppRoot(
+    vm: AppViewModel = viewModel(),
+    openMemoryId: String? = null,
+    onMemoryOpened: () -> Unit = {},
+) {
     val context = LocalContext.current
     var granted by remember { mutableStateOf(hasMediaAccess(context)) }
     var asked by rememberSaveable { mutableStateOf(false) }
@@ -106,7 +111,33 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
         return
     }
 
+    RequestNotificationPermission()
+
+    // Photo locations (for trip memories) need a separate runtime permission on Android 10+.
+    var askedLocation by rememberSaveable { mutableStateOf(false) }
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) vm.refresh()
+    }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 29 && !askedLocation &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            askedLocation = true
+            locationLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+        }
+    }
+
     val nav = rememberNavController()
+
+    // Opened from the daily reminder notification.
+    val allMemories by vm.allMemories.collectAsStateWithLifecycle()
+    LaunchedEffect(openMemoryId, allMemories) {
+        val id = openMemoryId ?: return@LaunchedEffect
+        if (allMemories.isEmpty()) return@LaunchedEffect
+        if (allMemories.any { it.id == id }) nav.navigate("memory/${Uri.encode(id)}")
+        onMemoryOpened()
+    }
     NavHost(navController = nav, startDestination = "home") {
         composable("home") {
             HomeScreen(
@@ -118,6 +149,7 @@ fun AppRoot(vm: AppViewModel = viewModel()) {
                 onOpenMemory = { nav.navigate("memory/${Uri.encode(it)}") },
                 onOpenCollection = { nav.navigate("collection/${Uri.encode(it)}") },
                 onOpenHidden = { nav.navigate("hidden") },
+                onOpenSettings = { nav.navigate(ROUTE_SETTINGS) },
             )
         }
         composable("viewer") {
