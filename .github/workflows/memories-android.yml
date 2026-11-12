@@ -8,10 +8,14 @@ on:
     paths:
       - "memories-app/**"
       - ".github/workflows/memories-android.yml"
+      - ".github/scripts/**"
+      - "!memories-app/screenshots/**"
   pull_request:
     paths:
       - "memories-app/**"
       - ".github/workflows/memories-android.yml"
+      - ".github/scripts/**"
+      - "!memories-app/screenshots/**"
   workflow_dispatch: {}
 
 jobs:
@@ -44,3 +48,69 @@ jobs:
           name: memories-apk
           path: memories-app/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+  # Installs the APK on an Android 14 emulator, loads sample photos/videos, taps through every
+  # feature, screenshots each step and fails if the app crashes. Screenshots are committed to
+  # memories-app/screenshots/ and uploaded as the "ui-screenshots" artifact.
+  ui-check:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: memories-apk
+          path: apk
+
+      - name: Generate sample media
+        run: |
+          pip install pillow piexif
+          python3 .github/scripts/make_sample_media.py sample_media
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run UI check on emulator
+        id: ui
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash .github/scripts/run_ui_check.sh
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: screenshots/
+
+      - name: Commit screenshots to the branch
+        if: always()
+        run: |
+          set -e
+          [ -d screenshots ] || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$GITHUB_REF_NAME"
+          git checkout -B "$GITHUB_REF_NAME" "origin/$GITHUB_REF_NAME"
+          rm -rf memories-app/screenshots && mkdir -p memories-app/screenshots
+          cp screenshots/*.png screenshots/REPORT.md memories-app/screenshots/ 2>/dev/null || true
+          git add memories-app/screenshots
+          git diff --cached --quiet && exit 0
+          git commit -m "Update UI screenshots from emulator check [skip ci]"
+          for i in 1 2 3; do git push origin "HEAD:$GITHUB_REF_NAME" && break; git pull --rebase origin "$GITHUB_REF_NAME"; done

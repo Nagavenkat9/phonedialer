@@ -213,7 +213,7 @@ fun PhotosScreen(
                 }
             }
         }
-        AnimatedVisibility(
+        androidx.compose.animation.AnimatedVisibility(
             visible = selecting,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
