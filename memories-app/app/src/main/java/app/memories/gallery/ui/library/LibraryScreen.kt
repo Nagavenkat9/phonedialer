@@ -19,7 +19,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Icon
@@ -27,16 +29,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.memories.gallery.data.GalleryItem
+import app.memories.gallery.faces.FaceIndex
 import app.memories.gallery.ui.AppViewModel
 import app.memories.gallery.ui.components.ScreenHeader
 import coil.compose.AsyncImage
@@ -63,6 +68,20 @@ fun LibraryScreen(
     val favCount = remember(media, favorites) { media.count { it.key in favorites } }
     val videoCount = remember(media) { media.count { it.isVideo } }
 
+    val context = LocalContext.current
+    val faceCounts by FaceIndex.counts.collectAsStateWithLifecycle()
+    val faceProgress by FaceIndex.progress.collectAsStateWithLifecycle()
+    LaunchedEffect(media) {
+        if (media.isNotEmpty()) FaceIndex.startScan(context, media)
+    }
+    val peopleCount = remember(media, faceCounts) { media.count { (faceCounts[it.key] ?: 0) >= 1 } }
+    val groupCount = remember(media, faceCounts) { media.count { (faceCounts[it.key] ?: 0) >= 3 } }
+    val scanSuffix = if (faceProgress.running && faceProgress.total > 0) {
+        " · Scanning ${faceProgress.done}/${faceProgress.total}…"
+    } else {
+        ""
+    }
+
     Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
         ScreenHeader("Library")
         LazyVerticalGrid(
@@ -79,6 +98,24 @@ fun LibraryScreen(
                         }
                         LibraryTile(Icons.Outlined.VideoLibrary, "Videos", "$videoCount", Modifier.weight(1f)) {
                             onOpenCollection("videos")
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LibraryTile(
+                            Icons.Outlined.Face,
+                            "People & selfies",
+                            "$peopleCount$scanSuffix",
+                            Modifier.weight(1f),
+                        ) {
+                            onOpenCollection("people")
+                        }
+                        LibraryTile(
+                            Icons.Outlined.Groups,
+                            "Group photos",
+                            "$groupCount$scanSuffix",
+                            Modifier.weight(1f),
+                        ) {
+                            onOpenCollection("groups")
                         }
                     }
                     LibraryTile(

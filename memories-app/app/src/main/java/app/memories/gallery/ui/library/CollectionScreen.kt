@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.memories.gallery.data.GalleryItem
+import app.memories.gallery.faces.FaceIndex
 import app.memories.gallery.ui.AppViewModel
 import app.memories.gallery.ui.components.EmptyState
 import app.memories.gallery.ui.components.MediaThumb
@@ -29,7 +30,7 @@ import java.time.LocalDate
 private data class Resolved(val title: String, val subtitle: String?, val items: List<GalleryItem>)
 
 /**
- * Generic grid for: "favorites", "videos", "album:<bucketId>", "day:<yyyy-MM-dd>", "memory:<id>".
+ * Generic grid for: "favorites", "videos", "people", "groups", "album:<bucketId>", "day:<yyyy-MM-dd>", "memory:<id>".
  */
 @Composable
 fun CollectionScreen(
@@ -41,12 +42,21 @@ fun CollectionScreen(
     val media by vm.media.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val memories by vm.allMemories.collectAsStateWithLifecycle()
+    val faceCounts by FaceIndex.counts.collectAsStateWithLifecycle()
+    val faceProgress by FaceIndex.progress.collectAsStateWithLifecycle()
+    val scanning = faceProgress.running && faceProgress.total > 0
+    val scanNote = if (scanning) "Scanning ${faceProgress.done}/${faceProgress.total}…" else null
 
-    val resolved = remember(collectionKey, media, favorites, memories) {
+    val faceKeyed = collectionKey == "people" || collectionKey == "groups"
+    val resolved = remember(collectionKey, media, favorites, memories, if (faceKeyed) faceCounts else null) {
         val today = LocalDate.now()
         when {
             collectionKey == "favorites" -> Resolved("Favorites", null, media.filter { it.key in favorites })
             collectionKey == "videos" -> Resolved("Videos", null, media.filter { it.isVideo })
+            collectionKey == "people" ->
+                Resolved("People & selfies", null, media.filter { (faceCounts[it.key] ?: 0) >= 1 })
+            collectionKey == "groups" ->
+                Resolved("Group photos", null, media.filter { (faceCounts[it.key] ?: 0) >= 3 })
             collectionKey.startsWith("album:") -> {
                 val id = collectionKey.removePrefix("album:")
                 val list = media.filter { it.bucketId == id }
@@ -69,7 +79,7 @@ fun CollectionScreen(
     }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        val sub = listOfNotNull(resolved.subtitle, "${resolved.items.size} items").joinToString(" · ")
+        val sub = listOfNotNull(resolved.subtitle, "${resolved.items.size} items", if (faceKeyed) scanNote else null).joinToString(" · ")
         ScreenHeader(resolved.title, subtitle = sub, onBack = onBack)
         if (resolved.items.isEmpty()) {
             Box(Modifier.fillMaxSize()) {
